@@ -2,29 +2,96 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 
 jobs:
-  create-release:
+  release:
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
       release_upload_url: ${{ steps.create-release.outputs.upload_url }}
+      new_version: ${{ steps.version-bump.outputs.new_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read current version
+        id: read-version
+        run: |
+          CURRENT_VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Check if tag already exists
+        id: check-tag
+        run: |
+          CURRENT_VERSION="${{ steps.read-version.outputs.current_version }}"
+          if git rev-parse "v$CURRENT_VERSION" >/dev/null 2>&1; then
+            echo "tag_exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v$CURRENT_VERSION already exists"
+          else
+            echo "tag_exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v$CURRENT_VERSION does not exist"
+          fi
+
+      - name: Bump version
+        id: version-bump
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          CURRENT_VERSION="${{ steps.read-version.outputs.current_version }}"
+          # Split version and increment patch
+          NEW_VERSION=$(echo $CURRENT_VERSION | awk -F. '{print $1"."$2"."$3+1}')
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Update tauri.conf.json
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          NEW_VERSION="${{ steps.version-bump.outputs.new_version }}"
+          jq --arg new_version "$NEW_VERSION" '.version = $new_version' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+
+      - name: Update package.json
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          NEW_VERSION="${{ steps.version-bump.outputs.new_version }}"
+          jq --arg new_version "$NEW_VERSION" '.version = $new_version' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+      - name: Commit version bump
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          NEW_VERSION="${{ steps.version-bump.outputs.new_version }}"
+          git add src-tauri/tauri.conf.json package.json
+          git commit -m "chore: bump version to v$NEW_VERSION [skip ci]"
+
+      - name: Create and push tag
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          NEW_VERSION="${{ steps.version-bump.outputs.new_version }}"
+          git tag "v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+
+      - name: Push version bump commit
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        run: |
+          git push origin main
 
       - name: Create Release
         id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: steps.check-tag.outputs.tag_exists == 'false'
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Prasaran ${{ github.ref_name }}
+          tag_name: v${{ steps.version-bump.outputs.new_version }}
+          name: Prasaran v${{ steps.version-bump.outputs.new_version }}
           body: |
-            ## Prasaran ${{ github.ref_name }}
+            ## Prasaran v${{ steps.version-bump.outputs.new_version }}
             
             Lightweight stream viewer for Facebook Live and YouTube Live.
             Designed for OBS Window Capture on low-power hardware.
@@ -35,9 +102,12 @@ jobs:
             - **Linux**: `.deb`, `.rpm`, or `.AppImage`
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-tauri:
-    needs: create-release
+    needs: release
+    if: needs.release.outputs.new_version != ''
     permissions:
       contents: write
     strategy:
@@ -57,6 +127,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -83,5 +155,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseId: ${{ needs.release.outputs.release_id }}
           args: ${{ matrix.args }}
