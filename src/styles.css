@@ -1,116 +1,138 @@
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
+/**
+ * Prasaran - Stream Viewer Styles
+ * 
+ * Optimized for:
+ * - OBS Window Capture (stable DOM, no animations)
+ * - Low resource usage (minimal styling)
+ * - Fixed 1280x720 window
+ */
 
-.logo.typescript:hover {
-  filter: drop-shadow(0 0 2em #2d79c7);
-}
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
+/* Reset and base styles */
+* {
   margin: 0;
-  padding-top: 10vh;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* No scrollbars - critical for OBS */
+  background-color: #000000; /* Pure black background */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: #ffffff;
+}
+
+/* Top control bar */
+#control-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50px;
+  background-color: #1a1a1a;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
+  align-items: center;
+  padding: 0 12px;
+  gap: 10px;
+  z-index: 100;
+  border-bottom: 1px solid #333333;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
+/* URL input field */
+#url-input {
+  flex: 1;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #444444;
+  border-radius: 4px;
+  background-color: #2a2a2a;
+  color: #ffffff;
+  font-size: 13px;
   outline: none;
 }
 
-#greet-input {
-  margin-right: 5px;
+#url-input:focus {
+  border-color: #0078d4;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
+#url-input::placeholder {
+  color: #888888;
+}
 
-  a:hover {
-    color: #24c8db;
-  }
+/* Load button */
+#load-btn {
+  height: 34px;
+  padding: 0 20px;
+  border: none;
+  border-radius: 4px;
+  background-color: #0078d4;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
 
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
+#load-btn:hover {
+  background-color: #1084d8;
+}
+
+#load-btn:active {
+  background-color: #006cbd;
+}
+
+#load-btn:disabled {
+  background-color: #555555;
+  cursor: not-allowed;
+}
+
+/* Status text */
+#status-text {
+  font-size: 12px;
+  color: #aaaaaa;
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+#status-text.error {
+  color: #ff6b6b;
+}
+
+#status-text.success {
+  color: #51cf66;
+}
+
+/* Player container - fills space below control bar */
+#player-container {
+  position: fixed;
+  top: 50px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Placeholder text when no stream loaded */
+#placeholder {
+  text-align: center;
+  color: #666666;
+  padding: 20px;
+}
+
+#placeholder p {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* Stream iframe - fills entire player container */
+#stream-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background-color: #000000;
 }
