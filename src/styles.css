@@ -134,7 +134,8 @@ body.fullscreen #player-container {
 }
 
 /* Load button */
-#load-btn {
+#load-btn,
+#reload-btn {
   height: 32px;
   padding: 0 16px;
   border: none;
@@ -147,11 +148,18 @@ body.fullscreen #player-container {
   white-space: nowrap;
 }
 
-#load-btn:hover {
+#reload-btn {
+  padding: 0 10px;
+  font-size: 16px;
+}
+
+#load-btn:hover,
+#reload-btn:hover {
   background-color: #1084d8;
 }
 
-#load-btn:active {
+#load-btn:active,
+#reload-btn:active {
   background-color: #006cbd;
 }
 

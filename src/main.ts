@@ -9,7 +9,7 @@
  * - Official embedded players only (iframe-based)
  * - Window size presets with screen limiting
  * - Video scaling modes: Fit, Stretch, Fill
- * - Fullscreen support
+ * - Fullscreen support (no stream restart)
  * - Responsive window resizing
  */
 
@@ -46,6 +46,10 @@ const SIZE_PRESETS: Record<string, SizePreset> = {
   '720x1280': { width: 720, height: 1280 },
 };
 
+// Large default size for Facebook embeds to avoid pixelation when scaling up
+const FB_EMBED_WIDTH = 1920;
+const FB_EMBED_HEIGHT = 1080;
+
 // ============================================================
 // State
 // ============================================================
@@ -67,6 +71,7 @@ let sizeSelect: HTMLSelectElement;
 let scaleMode: HTMLSelectElement;
 let urlInput: HTMLInputElement;
 let loadBtn: HTMLButtonElement;
+let reloadBtn: HTMLButtonElement;
 let statusText: HTMLElement;
 let playerContainer: HTMLElement;
 let placeholder: HTMLElement;
@@ -108,11 +113,7 @@ async function toggleFullscreen(): Promise<void> {
     document.body.classList.toggle('fullscreen', isFullscreen);
     updateFullscreenButtonIcon();
     setStatus(isFullscreen ? 'Fullscreen' : 'Windowed', 'success');
-    
-    // Reload Facebook stream for new dimensions
-    if (currentPlatform === 'facebook' && currentStreamUrl) {
-      setTimeout(() => reloadCurrentStream(), 200);
-    }
+    // No stream reload - CSS handles scaling
   } catch (err) {
     setStatus('Fullscreen failed', 'error');
     console.error('Prasaran: Fullscreen toggle failed', err);
@@ -155,10 +156,7 @@ async function toggleMaximize(): Promise<void> {
     }
     
     updateMaximizeButtonIcon();
-    
-    if (currentPlatform === 'facebook' && currentStreamUrl) {
-      setTimeout(() => reloadCurrentStream(), 100);
-    }
+    // No stream reload - CSS handles scaling
   } catch (err) {
     setStatus('Failed', 'error');
     console.error('Prasaran: Maximize toggle failed', err);
@@ -187,10 +185,7 @@ async function handleSizeChange(): Promise<void> {
     await appWindow.center();
     
     setStatus(`${limited.width}x${limited.height}`, 'success');
-    
-    if (currentPlatform === 'facebook' && currentStreamUrl) {
-      setTimeout(() => reloadCurrentStream(), 100);
-    }
+    // No stream reload - CSS handles scaling
   } catch (err) {
     setStatus('Resize failed', 'error');
   }
@@ -210,16 +205,6 @@ function handleScaleModeChange(): void {
   playerContainer.classList.add(`scale-${mode}`);
   
   setStatus(`${mode.charAt(0).toUpperCase() + mode.slice(1)} mode`, 'success');
-}
-
-// ============================================================
-// Player Dimensions
-// ============================================================
-
-function getPlayerDimensions(): { width: number; height: number } {
-  const width = playerContainer.clientWidth || 1280;
-  const height = playerContainer.clientHeight || 670;
-  return { width, height };
 }
 
 // ============================================================
@@ -259,8 +244,9 @@ function buildYouTubeEmbedUrl(videoId: string): string {
 
 function buildFacebookEmbedUrl(originalUrl: string): string {
   const encodedUrl = encodeURIComponent(originalUrl);
-  const { width, height } = getPlayerDimensions();
-  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${width}&height=${height}&show_text=false&autoplay=true&allowfullscreen=true`;
+  // Use large fixed dimensions so the embed has high quality
+  // CSS will handle scaling to fit the container
+  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${FB_EMBED_WIDTH}&height=${FB_EMBED_HEIGHT}&show_text=false&autoplay=true&allowfullscreen=true`;
 }
 
 function parseStreamUrl(url: string): ParseResult {
@@ -314,14 +300,6 @@ function createIframe(embedUrl: string, platform: Platform): void {
   playerContainer.appendChild(iframe);
 }
 
-function reloadCurrentStream(): void {
-  if (!currentStreamUrl || !currentPlatform) return;
-  const result = parseStreamUrl(currentStreamUrl);
-  if (result.embedUrl && result.platform) {
-    createIframe(result.embedUrl, result.platform);
-  }
-}
-
 function handleLoadStream(): void {
   const result = parseStreamUrl(urlInput.value);
   
@@ -339,6 +317,21 @@ function handleLoadStream(): void {
   }
 }
 
+function handleReloadStream(): void {
+  if (!currentStreamUrl || !currentPlatform) {
+    setStatus('No stream loaded', 'error');
+    return;
+  }
+  
+  const result = parseStreamUrl(currentStreamUrl);
+  
+  if (result.embedUrl && result.platform) {
+    setStatus('Reloading...', 'info');
+    createIframe(result.embedUrl, result.platform);
+    setStatus(result.platform === 'youtube' ? 'YouTube' : 'Facebook', 'success');
+  }
+}
+
 function handleKeyPress(event: KeyboardEvent): void {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -347,7 +340,7 @@ function handleKeyPress(event: KeyboardEvent): void {
 }
 
 function handleKeyDown(event: KeyboardEvent): void {
-  // F11 or Escape for fullscreen toggle
+  // F11 for fullscreen toggle
   if (event.key === 'F11') {
     event.preventDefault();
     toggleFullscreen();
@@ -381,11 +374,12 @@ async function init(): Promise<void> {
   scaleMode = document.getElementById('scale-mode') as HTMLSelectElement;
   urlInput = document.getElementById('url-input') as HTMLInputElement;
   loadBtn = document.getElementById('load-btn') as HTMLButtonElement;
+  reloadBtn = document.getElementById('reload-btn') as HTMLButtonElement;
   statusText = document.getElementById('status-text') as HTMLElement;
   playerContainer = document.getElementById('player-container') as HTMLElement;
   placeholder = document.getElementById('placeholder') as HTMLElement;
   
-  if (!fullscreenBtn || !maximizeBtn || !sizeSelect || !scaleMode || !urlInput || !loadBtn || !statusText || !playerContainer || !placeholder) {
+  if (!fullscreenBtn || !maximizeBtn || !sizeSelect || !scaleMode || !urlInput || !loadBtn || !reloadBtn || !statusText || !playerContainer || !placeholder) {
     console.error('Prasaran: DOM elements not found');
     return;
   }
@@ -398,19 +392,9 @@ async function init(): Promise<void> {
   sizeSelect.addEventListener('change', handleSizeChange);
   scaleMode.addEventListener('change', handleScaleModeChange);
   loadBtn.addEventListener('click', handleLoadStream);
+  reloadBtn.addEventListener('click', handleReloadStream);
   urlInput.addEventListener('keypress', handleKeyPress);
   document.addEventListener('keydown', handleKeyDown);
-  
-  // Handle window resize for Facebook streams
-  window.addEventListener('resize', () => {
-    if (currentPlatform === 'facebook' && currentStreamUrl) {
-      // Debounce reload
-      clearTimeout((window as unknown as { resizeTimeout?: number }).resizeTimeout);
-      (window as unknown as { resizeTimeout?: number }).resizeTimeout = window.setTimeout(() => {
-        reloadCurrentStream();
-      }, 500);
-    }
-  });
   
   await checkMaximizedState();
   setStatus('Ready', 'info');
