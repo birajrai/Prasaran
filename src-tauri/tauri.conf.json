@@ -16,8 +16,9 @@
         "title": "Prasaran - Stream Viewer",
         "width": 1280,
         "height": 720,
-        "resizable": false,
-        "maximizable": false,
+        "resizable": true,
+        "maximizable": true,
+        "maximized": true,
         "fullscreen": false,
         "center": true
       }

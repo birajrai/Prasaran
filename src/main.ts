@@ -8,7 +8,7 @@
  * - URL detection for YouTube and Facebook
  * - Official embedded players only (iframe-based)
  * - Clean iframe replacement (old iframe destroyed before new one)
- * - Window size selection for different streaming needs
+ * - Window size selection including Auto mode for native stream size
  * - Defensive error handling
  */
 
@@ -42,8 +42,13 @@ interface SizePreset {
 /** Height of the control bar in pixels */
 const CONTROL_BAR_HEIGHT = 50;
 
-/** Available window size presets */
-const SIZE_PRESETS: Record<string, SizePreset> = {
+/** Default Facebook video dimensions (common live stream sizes) */
+const FACEBOOK_DEFAULT_WIDTH = 1280;
+const FACEBOOK_DEFAULT_HEIGHT = 720;
+
+/** Available window size presets (null means auto) */
+const SIZE_PRESETS: Record<string, SizePreset | null> = {
+  'auto': null, // Auto mode - use native stream size
   '1920x1080': { width: 1920, height: 1080, label: '1080p' },
   '1280x720': { width: 1280, height: 720, label: '720p' },
   '854x480': { width: 854, height: 480, label: '480p' },
@@ -62,6 +67,8 @@ let currentStreamUrl: string | null = null;
 /** Currently loaded platform */
 let currentPlatform: Platform = null;
 
+
+
 // ============================================================
 // DOM Elements
 // ============================================================
@@ -78,20 +85,40 @@ let placeholder: HTMLElement;
 // ============================================================
 
 /**
- * Gets the current player area dimensions (excluding control bar)
+ * Checks if current mode is auto
+ */
+function checkAutoMode(): boolean {
+  return sizeSelect.value === 'auto';
+}
+
+/**
+ * Gets the current player area dimensions based on selected size
+ * For auto mode, uses default dimensions that work well with Facebook
  */
 function getPlayerDimensions(): { width: number; height: number } {
-  const preset = SIZE_PRESETS[sizeSelect.value];
+  const sizeKey = sizeSelect.value;
+  
+  if (sizeKey === 'auto') {
+    // For auto mode, we don't constrain - let Facebook use its native size
+    // Return large values so Facebook doesn't crop
+    return {
+      width: FACEBOOK_DEFAULT_WIDTH,
+      height: FACEBOOK_DEFAULT_HEIGHT
+    };
+  }
+  
+  const preset = SIZE_PRESETS[sizeKey];
   if (preset) {
     return {
       width: preset.width,
       height: preset.height - CONTROL_BAR_HEIGHT
     };
   }
-  // Fallback to container size
+  
+  // Fallback
   return {
-    width: playerContainer.clientWidth || 1280,
-    height: playerContainer.clientHeight || 670
+    width: 1280,
+    height: 670
   };
 }
 
@@ -103,7 +130,19 @@ function getPlayerDimensions(): { width: number; height: number } {
  * Resizes the Tauri window to the selected size
  */
 async function resizeWindow(sizeKey: string): Promise<void> {
+  // Handle auto mode
+  if (sizeKey === 'auto') {
+    setStatus('Auto mode - native size', 'success');
+    
+    // If a stream is loaded, reload it in auto mode
+    if (currentStreamUrl && currentPlatform) {
+      reloadCurrentStream();
+    }
+    return;
+  }
+  
   const preset = SIZE_PRESETS[sizeKey];
+  
   if (!preset) {
     console.error('Prasaran: Invalid size preset', sizeKey);
     return;
@@ -128,6 +167,26 @@ async function resizeWindow(sizeKey: string): Promise<void> {
   } catch (err) {
     setStatus('Failed to resize window', 'error');
     console.error('Prasaran: Failed to resize window', err);
+  }
+}
+
+/**
+ * Resizes window to fit the given dimensions (used for auto mode)
+ */
+async function resizeWindowToFit(width: number, height: number): Promise<void> {
+  try {
+    const appWindow = getCurrentWindow();
+    
+    // Add control bar height to total window height
+    const totalHeight = height + CONTROL_BAR_HEIGHT;
+    
+    await appWindow.setSize(new LogicalSize(width, totalHeight));
+    await appWindow.center();
+    
+    setStatus(`Auto: ${width}x${height}`, 'success');
+    console.log(`Prasaran: Window auto-resized to ${width}x${totalHeight}`);
+  } catch (err) {
+    console.error('Prasaran: Failed to auto-resize window', err);
   }
 }
 
@@ -222,16 +281,19 @@ function buildYouTubeEmbedUrl(videoId: string): string {
 
 /**
  * Builds Facebook embed URL from video URL
- * Facebook requires explicit width and height parameters for proper sizing
+ * In auto mode, we don't specify width/height to let it use native size
  */
-function buildFacebookEmbedUrl(originalUrl: string): string {
+function buildFacebookEmbedUrl(originalUrl: string, useAutoMode: boolean): string {
   const encodedUrl = encodeURIComponent(originalUrl);
-  const dimensions = getPlayerDimensions();
   
-  // Facebook embed requires explicit width/height for proper scaling
-  // show_text=false: Hide post text
-  // autoplay=true: Auto-start playback
-  // allowfullscreen=true: Allow fullscreen
+  if (useAutoMode) {
+    // Auto mode: Don't specify dimensions, let Facebook use native size
+    // This allows the video to render at its actual resolution
+    return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&show_text=false&autoplay=true&allowfullscreen=true`;
+  }
+  
+  // Fixed size mode: Specify dimensions
+  const dimensions = getPlayerDimensions();
   return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${dimensions.width}&height=${dimensions.height}&show_text=false&autoplay=true&allowfullscreen=true`;
 }
 
@@ -291,9 +353,10 @@ function parseStreamUrl(url: string): ParseResult {
   }
   
   if (platform === 'facebook') {
+    const autoMode = checkAutoMode();
     return {
       platform: 'facebook',
-      embedUrl: buildFacebookEmbedUrl(trimmedUrl),
+      embedUrl: buildFacebookEmbedUrl(trimmedUrl, autoMode),
       error: null
     };
   }
@@ -349,12 +412,33 @@ function createIframe(embedUrl: string, platform: Platform): void {
   iframe.id = 'stream-iframe';
   iframe.src = embedUrl;
   
+  // Set scrolling attribute to prevent scrollbars
+  iframe.setAttribute('scrolling', 'no');
+  
   // Allow necessary features for video playback
   iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
   iframe.allowFullscreen = true;
   
   // Set appropriate title for accessibility
   iframe.title = platform === 'youtube' ? 'YouTube Live Stream' : 'Facebook Live Stream';
+  
+  // Apply appropriate CSS class based on mode
+  const autoMode = checkAutoMode();
+  
+  if (autoMode && platform === 'facebook') {
+    // Auto mode for Facebook: use native dimensions
+    iframe.classList.add('auto-mode');
+    
+    // Listen for iframe load to resize window to match content
+    iframe.onload = () => {
+      // For Facebook in auto mode, resize window to common HD size
+      // Facebook embeds typically render at 16:9 aspect ratio
+      resizeWindowToFit(FACEBOOK_DEFAULT_WIDTH, FACEBOOK_DEFAULT_HEIGHT);
+    };
+  } else {
+    // Fill mode: stretch to fill container
+    iframe.classList.add('fill-mode');
+  }
   
   // Append to container
   playerContainer.appendChild(iframe);
@@ -371,7 +455,7 @@ function reloadCurrentStream(): void {
   const result = parseStreamUrl(currentStreamUrl);
   if (result.embedUrl && result.platform) {
     createIframe(result.embedUrl, result.platform);
-    setStatus('Stream reloaded for new size', 'success');
+    setStatus('Stream reloaded', 'success');
   }
 }
 
