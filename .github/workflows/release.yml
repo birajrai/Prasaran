@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       release_id: ${{ steps.create-release.outputs.id }}
       release_upload_url: ${{ steps.create-release.outputs.upload_url }}
@@ -100,10 +102,6 @@ jobs:
             - **Windows**: `.msi` installer or `.exe` setup
             - **macOS**: `.dmg` disk image
             - **Linux**: `.deb`, `.rpm`, or `.AppImage`
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-tauri:
     needs: release
