@@ -8,8 +8,11 @@
  * - URL detection for YouTube and Facebook
  * - Official embedded players only (iframe-based)
  * - Clean iframe replacement (old iframe destroyed before new one)
+ * - Window size selection for different streaming needs
  * - Defensive error handling
  */
+
+import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 
 // ============================================================
 // Types
@@ -25,15 +28,116 @@ interface ParseResult {
   error: string | null;
 }
 
+/** Window size preset */
+interface SizePreset {
+  width: number;
+  height: number;
+  label: string;
+}
+
+// ============================================================
+// Constants
+// ============================================================
+
+/** Height of the control bar in pixels */
+const CONTROL_BAR_HEIGHT = 50;
+
+/** Available window size presets */
+const SIZE_PRESETS: Record<string, SizePreset> = {
+  '1920x1080': { width: 1920, height: 1080, label: '1080p' },
+  '1280x720': { width: 1280, height: 720, label: '720p' },
+  '854x480': { width: 854, height: 480, label: '480p' },
+  '640x360': { width: 640, height: 360, label: '360p' },
+  '1080x1920': { width: 1080, height: 1920, label: 'Vertical 1080' },
+  '720x1280': { width: 720, height: 1280, label: 'Vertical 720' },
+};
+
+// ============================================================
+// State
+// ============================================================
+
+/** Currently loaded stream URL (original, not embed URL) */
+let currentStreamUrl: string | null = null;
+
+/** Currently loaded platform */
+let currentPlatform: Platform = null;
+
 // ============================================================
 // DOM Elements
 // ============================================================
 
+let sizeSelect: HTMLSelectElement;
 let urlInput: HTMLInputElement;
 let loadBtn: HTMLButtonElement;
 let statusText: HTMLElement;
 let playerContainer: HTMLElement;
 let placeholder: HTMLElement;
+
+// ============================================================
+// Utility Functions
+// ============================================================
+
+/**
+ * Gets the current player area dimensions (excluding control bar)
+ */
+function getPlayerDimensions(): { width: number; height: number } {
+  const preset = SIZE_PRESETS[sizeSelect.value];
+  if (preset) {
+    return {
+      width: preset.width,
+      height: preset.height - CONTROL_BAR_HEIGHT
+    };
+  }
+  // Fallback to container size
+  return {
+    width: playerContainer.clientWidth || 1280,
+    height: playerContainer.clientHeight || 670
+  };
+}
+
+// ============================================================
+// Window Size Functions
+// ============================================================
+
+/**
+ * Resizes the Tauri window to the selected size
+ */
+async function resizeWindow(sizeKey: string): Promise<void> {
+  const preset = SIZE_PRESETS[sizeKey];
+  if (!preset) {
+    console.error('Prasaran: Invalid size preset', sizeKey);
+    return;
+  }
+
+  try {
+    const appWindow = getCurrentWindow();
+    
+    // Use LogicalSize for consistent sizing across different DPI settings
+    await appWindow.setSize(new LogicalSize(preset.width, preset.height));
+    
+    // Center the window after resize
+    await appWindow.center();
+    
+    setStatus(`Resized to ${preset.width}x${preset.height}`, 'success');
+    console.log(`Prasaran: Window resized to ${preset.width}x${preset.height}`);
+    
+    // If Facebook stream is loaded, reload it with new dimensions
+    if (currentPlatform === 'facebook' && currentStreamUrl) {
+      reloadCurrentStream();
+    }
+  } catch (err) {
+    setStatus('Failed to resize window', 'error');
+    console.error('Prasaran: Failed to resize window', err);
+  }
+}
+
+/**
+ * Handles size selector change
+ */
+function handleSizeChange(): void {
+  const selectedSize = sizeSelect.value;
+  resizeWindow(selectedSize);
+}
 
 // ============================================================
 // URL Parsing Functions
@@ -118,14 +222,17 @@ function buildYouTubeEmbedUrl(videoId: string): string {
 
 /**
  * Builds Facebook embed URL from video URL
- * Facebook requires the full video URL to be passed as href parameter
+ * Facebook requires explicit width and height parameters for proper sizing
  */
 function buildFacebookEmbedUrl(originalUrl: string): string {
-  // Encode the original URL for use in the embed
   const encodedUrl = encodeURIComponent(originalUrl);
+  const dimensions = getPlayerDimensions();
+  
+  // Facebook embed requires explicit width/height for proper scaling
+  // show_text=false: Hide post text
   // autoplay=true: Auto-start playback
-  // width/height handled by iframe styling
-  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&show_text=false&autoplay=true`;
+  // allowfullscreen=true: Allow fullscreen
+  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${dimensions.width}&height=${dimensions.height}&show_text=false&autoplay=true&allowfullscreen=true`;
 }
 
 /**
@@ -221,13 +328,6 @@ function destroyCurrentIframe(): void {
 }
 
 /**
- * Shows the placeholder text
- */
-function showPlaceholder(): void {
-  placeholder.style.display = 'block';
-}
-
-/**
  * Hides the placeholder text
  */
 function hidePlaceholder(): void {
@@ -261,6 +361,21 @@ function createIframe(embedUrl: string, platform: Platform): void {
 }
 
 /**
+ * Reloads the current stream (used when window size changes for Facebook)
+ */
+function reloadCurrentStream(): void {
+  if (!currentStreamUrl || !currentPlatform) {
+    return;
+  }
+  
+  const result = parseStreamUrl(currentStreamUrl);
+  if (result.embedUrl && result.platform) {
+    createIframe(result.embedUrl, result.platform);
+    setStatus('Stream reloaded for new size', 'success');
+  }
+}
+
+/**
  * Handles the Load Stream button click
  */
 function handleLoadStream(): void {
@@ -280,6 +395,10 @@ function handleLoadStream(): void {
     setStatus(`Loading ${result.platform}...`, 'info');
     
     try {
+      // Store current stream info for potential reload
+      currentStreamUrl = url;
+      currentPlatform = result.platform;
+      
       createIframe(result.embedUrl, result.platform);
       setStatus(`${result.platform === 'youtube' ? 'YouTube' : 'Facebook'} loaded`, 'success');
     } catch (err) {
@@ -308,6 +427,7 @@ function handleKeyPress(event: KeyboardEvent): void {
  */
 function init(): void {
   // Get DOM elements
+  sizeSelect = document.getElementById('size-select') as HTMLSelectElement;
   urlInput = document.getElementById('url-input') as HTMLInputElement;
   loadBtn = document.getElementById('load-btn') as HTMLButtonElement;
   statusText = document.getElementById('status-text') as HTMLElement;
@@ -315,12 +435,13 @@ function init(): void {
   placeholder = document.getElementById('placeholder') as HTMLElement;
   
   // Validate all elements exist
-  if (!urlInput || !loadBtn || !statusText || !playerContainer || !placeholder) {
+  if (!sizeSelect || !urlInput || !loadBtn || !statusText || !playerContainer || !placeholder) {
     console.error('Prasaran: Required DOM elements not found');
     return;
   }
   
   // Attach event listeners
+  sizeSelect.addEventListener('change', handleSizeChange);
   loadBtn.addEventListener('click', handleLoadStream);
   urlInput.addEventListener('keypress', handleKeyPress);
   

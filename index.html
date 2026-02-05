@@ -10,13 +10,26 @@
   <body>
     <!-- 
       Prasaran: Lightweight stream viewer for OBS Window Capture
-      - Fixed 1280x720 window
+      - Selectable window sizes for different streaming needs
+      - Auto mode for Facebook to show native stream size
       - Black background for clean OBS capture
       - Minimal DOM for stability
     -->
     
     <!-- Top control bar - stays fixed at top -->
     <div id="control-bar">
+      <!-- Size selector -->
+      <select id="size-select" title="Window Size">
+        <option value="auto">Auto (Native Size)</option>
+        <option value="1920x1080">1920x1080 (1080p)</option>
+        <option value="1280x720" selected>1280x720 (720p)</option>
+        <option value="854x480">854x480 (480p)</option>
+        <option value="640x360">640x360 (360p)</option>
+        <option value="1080x1920">1080x1920 (Vertical)</option>
+        <option value="720x1280">720x1280 (Vertical)</option>
+      </select>
+      
+      <!-- URL input -->
       <input 
         type="text" 
         id="url-input" 
