@@ -11,8 +11,12 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-is-maximized",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "core:window:allow-available-monitors",
     "core:window:allow-current-monitor",
-    "core:window:allow-primary-monitor"
+    "core:window:allow-primary-monitor",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-size"
   ]
 }

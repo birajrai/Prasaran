@@ -10,44 +10,54 @@
   <body>
     <!-- 
       Prasaran: Lightweight stream viewer for OBS Window Capture
-      - Starts maximized by default
-      - Maximize/Restore toggle button
-      - Black background for clean OBS capture
-      - Minimal DOM for stability
+      - Resizable window with responsive video
+      - Size presets + Fit/Stretch/Fill modes
+      - Fullscreen support
     -->
     
     <!-- Top control bar - stays fixed at top -->
     <div id="control-bar">
-      <!-- Maximize/Restore button -->
-      <button id="maximize-btn" type="button" title="Restore Down">&#9634;</button>
+      <!-- Fullscreen toggle button -->
+      <button id="fullscreen-btn" type="button" title="Toggle Fullscreen (F11)">&#x26F6;</button>
       
-      <!-- Size selector (for restore mode) -->
-      <select id="size-select" title="Window Size (when restored)">
-        <option value="1920x1080">1920x1080 (1080p)</option>
-        <option value="1280x720" selected>1280x720 (720p)</option>
-        <option value="854x480">854x480 (480p)</option>
-        <option value="640x360">640x360 (360p)</option>
-        <option value="1080x1920">1080x1920 (Vertical)</option>
-        <option value="720x1280">720x1280 (Vertical)</option>
+      <!-- Maximize/Restore button -->
+      <button id="maximize-btn" type="button" title="Maximize/Restore">&#9634;</button>
+      
+      <!-- Window size presets -->
+      <select id="size-select" title="Window Size">
+        <option value="1920x1080">1920x1080</option>
+        <option value="1280x720" selected>1280x720</option>
+        <option value="854x480">854x480</option>
+        <option value="640x360">640x360</option>
+        <option value="1080x1920">1080x1920 (V)</option>
+        <option value="720x1280">720x1280 (V)</option>
+      </select>
+      
+      <!-- Video scaling mode -->
+      <select id="scale-mode" title="Video Scaling">
+        <option value="fit" selected>Fit</option>
+        <option value="stretch">Stretch</option>
+        <option value="fill">Fill</option>
       </select>
       
       <!-- URL input -->
       <input 
         type="text" 
         id="url-input" 
-        placeholder="Paste Facebook Live or YouTube Live URL here..."
+        placeholder="Paste Facebook Live or YouTube Live URL..."
         spellcheck="false"
         autocomplete="off"
       />
-      <button id="load-btn" type="button">Load Stream</button>
+      <button id="load-btn" type="button">Load</button>
       <span id="status-text"></span>
     </div>
 
     <!-- Player container - fills remaining space -->
-    <div id="player-container">
+    <div id="player-container" class="scale-fit">
       <!-- Placeholder shown when no stream is loaded -->
       <div id="placeholder">
-        <p>Paste a Facebook Live or YouTube Live URL above and click "Load Stream"</p>
+        <p>Paste a Facebook Live or YouTube Live URL above and click "Load"</p>
+        <p class="hint">Drag window edges to resize | F11 for fullscreen</p>
       </div>
       <!-- Iframe will be injected here when stream is loaded -->
     </div>

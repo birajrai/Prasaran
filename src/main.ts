@@ -7,10 +7,10 @@
  * Features:
  * - URL detection for YouTube and Facebook
  * - Official embedded players only (iframe-based)
- * - Clean iframe replacement (old iframe destroyed before new one)
- * - Maximize/Restore window toggle (starts maximized)
- * - Window size presets with screen size limiting
- * - Defensive error handling
+ * - Window size presets with screen limiting
+ * - Video scaling modes: Fit, Stretch, Fill
+ * - Fullscreen support
+ * - Responsive window resizing
  */
 
 import { getCurrentWindow, LogicalSize, currentMonitor } from '@tauri-apps/api/window';
@@ -19,17 +19,15 @@ import { getCurrentWindow, LogicalSize, currentMonitor } from '@tauri-apps/api/w
 // Types
 // ============================================================
 
-/** Supported streaming platforms */
 type Platform = 'youtube' | 'facebook' | null;
+type ScaleMode = 'fit' | 'stretch' | 'fill';
 
-/** Result of URL parsing */
 interface ParseResult {
   platform: Platform;
   embedUrl: string | null;
   error: string | null;
 }
 
-/** Window size preset */
 interface SizePreset {
   width: number;
   height: number;
@@ -39,7 +37,6 @@ interface SizePreset {
 // Constants
 // ============================================================
 
-/** Available window size presets */
 const SIZE_PRESETS: Record<string, SizePreset> = {
   '1920x1080': { width: 1920, height: 1080 },
   '1280x720': { width: 1280, height: 720 },
@@ -53,16 +50,10 @@ const SIZE_PRESETS: Record<string, SizePreset> = {
 // State
 // ============================================================
 
-/** Currently loaded stream URL (original, not embed URL) */
 let currentStreamUrl: string | null = null;
-
-/** Currently loaded platform */
 let currentPlatform: Platform = null;
-
-/** Whether window is currently maximized */
 let isMaximized = true;
-
-/** Screen dimensions (updated on init) */
+let isFullscreen = false;
 let screenWidth = 1920;
 let screenHeight = 1080;
 
@@ -70,8 +61,10 @@ let screenHeight = 1080;
 // DOM Elements
 // ============================================================
 
+let fullscreenBtn: HTMLButtonElement;
 let maximizeBtn: HTMLButtonElement;
 let sizeSelect: HTMLSelectElement;
+let scaleMode: HTMLSelectElement;
 let urlInput: HTMLInputElement;
 let loadBtn: HTMLButtonElement;
 let statusText: HTMLElement;
@@ -79,57 +72,72 @@ let playerContainer: HTMLElement;
 let placeholder: HTMLElement;
 
 // ============================================================
-// Window Functions
+// Screen & Window Functions
 // ============================================================
 
-/**
- * Gets the current monitor's screen size
- */
 async function updateScreenSize(): Promise<void> {
   try {
     const monitor = await currentMonitor();
     if (monitor) {
       screenWidth = monitor.size.width;
       screenHeight = monitor.size.height;
-      console.log(`Prasaran: Screen size detected: ${screenWidth}x${screenHeight}`);
     }
   } catch (err) {
     console.error('Prasaran: Failed to get screen size', err);
   }
 }
 
-/**
- * Limits a size to fit within the screen (with some margin for taskbar)
- */
 function limitToScreen(width: number, height: number): { width: number; height: number } {
-  // Leave margin for taskbar and window decorations
   const maxWidth = screenWidth - 50;
   const maxHeight = screenHeight - 100;
-  
   return {
     width: Math.min(width, maxWidth),
     height: Math.min(height, maxHeight)
   };
 }
 
-/**
- * Updates the maximize button icon based on current state
- */
+// ============================================================
+// Fullscreen Functions
+// ============================================================
+
+async function toggleFullscreen(): Promise<void> {
+  try {
+    const appWindow = getCurrentWindow();
+    isFullscreen = !isFullscreen;
+    await appWindow.setFullscreen(isFullscreen);
+    document.body.classList.toggle('fullscreen', isFullscreen);
+    updateFullscreenButtonIcon();
+    setStatus(isFullscreen ? 'Fullscreen' : 'Windowed', 'success');
+    
+    // Reload Facebook stream for new dimensions
+    if (currentPlatform === 'facebook' && currentStreamUrl) {
+      setTimeout(() => reloadCurrentStream(), 200);
+    }
+  } catch (err) {
+    setStatus('Fullscreen failed', 'error');
+    console.error('Prasaran: Fullscreen toggle failed', err);
+  }
+}
+
+function updateFullscreenButtonIcon(): void {
+  fullscreenBtn.innerHTML = isFullscreen ? '&#x2716;' : '&#x26F6;';
+  fullscreenBtn.title = isFullscreen ? 'Exit Fullscreen (F11/Esc)' : 'Fullscreen (F11)';
+}
+
+// ============================================================
+// Maximize Functions
+// ============================================================
+
 function updateMaximizeButtonIcon(): void {
-  // &#9634; = restore icon (overlapping squares), &#9744; = maximize icon (single square)
   maximizeBtn.innerHTML = isMaximized ? '&#9634;' : '&#9744;';
   maximizeBtn.title = isMaximized ? 'Restore Down' : 'Maximize';
 }
 
-/**
- * Toggles between maximized and restored window state
- */
 async function toggleMaximize(): Promise<void> {
   try {
     const appWindow = getCurrentWindow();
     
     if (isMaximized) {
-      // Restore to selected size (limited to screen)
       await appWindow.unmaximize();
       const sizeKey = sizeSelect.value;
       const preset = SIZE_PRESETS[sizeKey];
@@ -139,9 +147,8 @@ async function toggleMaximize(): Promise<void> {
         await appWindow.center();
       }
       isMaximized = false;
-      setStatus(`Restored to ${sizeKey}`, 'success');
+      setStatus('Restored', 'success');
     } else {
-      // Maximize
       await appWindow.maximize();
       isMaximized = true;
       setStatus('Maximized', 'success');
@@ -149,63 +156,67 @@ async function toggleMaximize(): Promise<void> {
     
     updateMaximizeButtonIcon();
     
-    // Reload Facebook stream if loaded (needs new dimensions)
     if (currentPlatform === 'facebook' && currentStreamUrl) {
       setTimeout(() => reloadCurrentStream(), 100);
     }
   } catch (err) {
-    setStatus('Failed to toggle window', 'error');
-    console.error('Prasaran: Failed to toggle maximize', err);
+    setStatus('Failed', 'error');
+    console.error('Prasaran: Maximize toggle failed', err);
   }
 }
 
-/**
- * Handles size selector change (only applies when not maximized)
- */
+// ============================================================
+// Size Functions
+// ============================================================
+
 async function handleSizeChange(): Promise<void> {
   if (isMaximized) {
-    // If maximized, just store the preference for when restored
-    setStatus('Size will apply when restored', 'info');
+    setStatus('Restore first', 'info');
     return;
   }
   
   const sizeKey = sizeSelect.value;
   const preset = SIZE_PRESETS[sizeKey];
   
-  if (!preset) {
-    console.error('Prasaran: Invalid size preset', sizeKey);
-    return;
-  }
+  if (!preset) return;
 
   try {
     const appWindow = getCurrentWindow();
-    
-    // Limit size to screen dimensions
     const limited = limitToScreen(preset.width, preset.height);
     await appWindow.setSize(new LogicalSize(limited.width, limited.height));
     await appWindow.center();
     
-    if (limited.width !== preset.width || limited.height !== preset.height) {
-      setStatus(`Limited to ${limited.width}x${limited.height}`, 'info');
-    } else {
-      setStatus(`Resized to ${preset.width}x${preset.height}`, 'success');
-    }
+    setStatus(`${limited.width}x${limited.height}`, 'success');
     
-    // Reload Facebook stream if loaded
     if (currentPlatform === 'facebook' && currentStreamUrl) {
       setTimeout(() => reloadCurrentStream(), 100);
     }
   } catch (err) {
-    setStatus('Failed to resize', 'error');
-    console.error('Prasaran: Failed to resize window', err);
+    setStatus('Resize failed', 'error');
   }
 }
 
-/**
- * Gets current player container dimensions
- */
+// ============================================================
+// Scale Mode Functions
+// ============================================================
+
+function handleScaleModeChange(): void {
+  const mode = scaleMode.value as ScaleMode;
+  
+  // Remove all scale classes
+  playerContainer.classList.remove('scale-fit', 'scale-stretch', 'scale-fill');
+  
+  // Add selected scale class
+  playerContainer.classList.add(`scale-${mode}`);
+  
+  setStatus(`${mode.charAt(0).toUpperCase() + mode.slice(1)} mode`, 'success');
+}
+
+// ============================================================
+// Player Dimensions
+// ============================================================
+
 function getPlayerDimensions(): { width: number; height: number } {
-  // Use actual container size for accurate dimensions
   const width = playerContainer.clientWidth || 1280;
   const height = playerContainer.clientHeight || 670;
   return { width, height };
@@ -215,154 +226,78 @@ function getPlayerDimensions(): { width: number; height: number } {
 // URL Parsing Functions
 // ============================================================
 
-/**
- * Detects the platform from a URL
- */
 function detectPlatform(url: string): Platform {
   try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    
-    if (
-      hostname.includes('youtube.com') ||
-      hostname.includes('youtu.be') ||
-      hostname.includes('youtube-nocookie.com')
-    ) {
-      return 'youtube';
-    }
-    
-    if (
-      hostname.includes('facebook.com') ||
-      hostname.includes('fb.watch') ||
-      hostname.includes('fb.com')
-    ) {
-      return 'facebook';
-    }
-    
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return 'youtube';
+    if (hostname.includes('facebook.com') || hostname.includes('fb.watch') || hostname.includes('fb.com')) return 'facebook';
     return null;
   } catch {
     return null;
   }
 }
 
-/**
- * Extracts YouTube video ID from various URL formats
- */
 function extractYouTubeVideoId(url: string): string | null {
   try {
     const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    
-    if (urlObj.searchParams.has('v')) {
-      return urlObj.searchParams.get('v');
+    if (urlObj.searchParams.has('v')) return urlObj.searchParams.get('v');
+    if (urlObj.hostname.includes('youtu.be')) {
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      if (parts.length > 0) return parts[0];
     }
-    
-    if (hostname.includes('youtu.be')) {
-      const pathParts = urlObj.pathname.split('/').filter(Boolean);
-      if (pathParts.length > 0) {
-        return pathParts[0];
-      }
-    }
-    
-    const pathMatch = urlObj.pathname.match(/\/(live|embed|shorts|v)\/([a-zA-Z0-9_-]+)/);
-    if (pathMatch && pathMatch[2]) {
-      return pathMatch[2];
-    }
-    
+    const match = urlObj.pathname.match(/\/(live|embed|shorts|v)\/([a-zA-Z0-9_-]+)/);
+    if (match?.[2]) return match[2];
     return null;
   } catch {
     return null;
   }
 }
 
-/**
- * Builds YouTube embed URL from video ID
- */
 function buildYouTubeEmbedUrl(videoId: string): string {
   return `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
 }
 
-/**
- * Builds Facebook embed URL from video URL
- * Uses current player dimensions for proper sizing
- */
 function buildFacebookEmbedUrl(originalUrl: string): string {
   const encodedUrl = encodeURIComponent(originalUrl);
   const { width, height } = getPlayerDimensions();
-  
-  // Facebook embed with explicit dimensions matching the container
-  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${width}&height=${height}&show_text=false&autoplay=true&allowfullscreen=true&mute=false`;
+  return `https://www.facebook.com/plugins/video.php?href=${encodedUrl}&width=${width}&height=${height}&show_text=false&autoplay=true&allowfullscreen=true`;
 }
 
-/**
- * Parses a URL and returns embed information
- */
 function parseStreamUrl(url: string): ParseResult {
   const trimmedUrl = url.trim();
+  if (!trimmedUrl) return { platform: null, embedUrl: null, error: 'Enter a URL' };
   
-  if (!trimmedUrl) {
-    return { platform: null, embedUrl: null, error: 'Please enter a URL' };
-  }
-  
-  try {
-    new URL(trimmedUrl);
-  } catch {
-    return { platform: null, embedUrl: null, error: 'Invalid URL format' };
-  }
+  try { new URL(trimmedUrl); } catch { return { platform: null, embedUrl: null, error: 'Invalid URL' }; }
   
   const platform = detectPlatform(trimmedUrl);
-  
-  if (!platform) {
-    return { platform: null, embedUrl: null, error: 'URL must be from YouTube or Facebook' };
-  }
+  if (!platform) return { platform: null, embedUrl: null, error: 'Use YouTube or Facebook' };
   
   if (platform === 'youtube') {
     const videoId = extractYouTubeVideoId(trimmedUrl);
-    if (!videoId) {
-      return { platform: 'youtube', embedUrl: null, error: 'Could not extract YouTube video ID' };
-    }
+    if (!videoId) return { platform: 'youtube', embedUrl: null, error: 'Invalid YouTube URL' };
     return { platform: 'youtube', embedUrl: buildYouTubeEmbedUrl(videoId), error: null };
   }
   
-  if (platform === 'facebook') {
-    return { platform: 'facebook', embedUrl: buildFacebookEmbedUrl(trimmedUrl), error: null };
-  }
-  
-  return { platform: null, embedUrl: null, error: 'Unsupported platform' };
+  return { platform: 'facebook', embedUrl: buildFacebookEmbedUrl(trimmedUrl), error: null };
 }
 
 // ============================================================
 // UI Functions
 // ============================================================
 
-/**
- * Updates the status text display
- */
 function setStatus(message: string, type: 'info' | 'error' | 'success' = 'info'): void {
   statusText.textContent = message;
   statusText.className = type;
 }
 
-/**
- * Removes existing iframe from player container
- */
 function destroyCurrentIframe(): void {
-  const existingIframe = document.getElementById('stream-iframe');
-  if (existingIframe) {
-    existingIframe.remove();
-  }
+  document.getElementById('stream-iframe')?.remove();
 }
 
-/**
- * Hides the placeholder text
- */
 function hidePlaceholder(): void {
   placeholder.style.display = 'none';
 }
 
-/**
- * Creates and injects a new iframe with the given embed URL
- */
 function createIframe(embedUrl: string, platform: Platform): void {
   destroyCurrentIframe();
   hidePlaceholder();
@@ -374,32 +309,21 @@ function createIframe(embedUrl: string, platform: Platform): void {
   iframe.setAttribute('frameborder', '0');
   iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
   iframe.allowFullscreen = true;
-  iframe.title = platform === 'youtube' ? 'YouTube Live Stream' : 'Facebook Live Stream';
+  iframe.title = platform === 'youtube' ? 'YouTube Stream' : 'Facebook Stream';
   
   playerContainer.appendChild(iframe);
 }
 
-/**
- * Reloads the current stream with updated dimensions
- */
 function reloadCurrentStream(): void {
-  if (!currentStreamUrl || !currentPlatform) {
-    return;
-  }
-  
+  if (!currentStreamUrl || !currentPlatform) return;
   const result = parseStreamUrl(currentStreamUrl);
   if (result.embedUrl && result.platform) {
     createIframe(result.embedUrl, result.platform);
-    console.log('Prasaran: Stream reloaded with new dimensions');
   }
 }
 
-/**
- * Handles the Load Stream button click
- */
 function handleLoadStream(): void {
-  const url = urlInput.value;
-  const result = parseStreamUrl(url);
+  const result = parseStreamUrl(urlInput.value);
   
   if (result.error) {
     setStatus(result.error, 'error');
@@ -407,24 +331,14 @@ function handleLoadStream(): void {
   }
   
   if (result.embedUrl && result.platform) {
-    setStatus(`Loading ${result.platform}...`, 'info');
-    
-    try {
-      currentStreamUrl = url;
-      currentPlatform = result.platform;
-      
-      createIframe(result.embedUrl, result.platform);
-      setStatus(`${result.platform === 'youtube' ? 'YouTube' : 'Facebook'} loaded`, 'success');
-    } catch (err) {
-      setStatus('Failed to load stream', 'error');
-      console.error('Prasaran: Failed to create iframe', err);
-    }
+    setStatus('Loading...', 'info');
+    currentStreamUrl = urlInput.value;
+    currentPlatform = result.platform;
+    createIframe(result.embedUrl, result.platform);
+    setStatus(result.platform === 'youtube' ? 'YouTube' : 'Facebook', 'success');
   }
 }
 
-/**
- * Handles Enter key press in URL input
- */
 function handleKeyPress(event: KeyboardEvent): void {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -432,15 +346,13 @@ function handleKeyPress(event: KeyboardEvent): void {
   }
 }
 
-/**
- * Handles keyboard shortcuts
- */
 function handleKeyDown(event: KeyboardEvent): void {
-  // Escape key to restore/minimize if window is too big
-  if (event.key === 'Escape' && !isMaximized) {
-    // Set to smallest size
-    sizeSelect.value = '640x360';
-    handleSizeChange();
+  // F11 or Escape for fullscreen toggle
+  if (event.key === 'F11') {
+    event.preventDefault();
+    toggleFullscreen();
+  } else if (event.key === 'Escape' && isFullscreen) {
+    toggleFullscreen();
   }
 }
 
@@ -448,56 +360,61 @@ function handleKeyDown(event: KeyboardEvent): void {
 // Initialization
 // ============================================================
 
-/**
- * Checks if window is currently maximized and updates state
- */
 async function checkMaximizedState(): Promise<void> {
   try {
     const appWindow = getCurrentWindow();
     isMaximized = await appWindow.isMaximized();
+    isFullscreen = await appWindow.isFullscreen();
     updateMaximizeButtonIcon();
+    updateFullscreenButtonIcon();
+    document.body.classList.toggle('fullscreen', isFullscreen);
   } catch (err) {
-    console.error('Prasaran: Failed to check maximized state', err);
+    console.error('Prasaran: State check failed', err);
   }
 }
 
-/**
- * Initializes the application when DOM is ready
- */
 async function init(): Promise<void> {
   // Get DOM elements
+  fullscreenBtn = document.getElementById('fullscreen-btn') as HTMLButtonElement;
   maximizeBtn = document.getElementById('maximize-btn') as HTMLButtonElement;
   sizeSelect = document.getElementById('size-select') as HTMLSelectElement;
+  scaleMode = document.getElementById('scale-mode') as HTMLSelectElement;
   urlInput = document.getElementById('url-input') as HTMLInputElement;
   loadBtn = document.getElementById('load-btn') as HTMLButtonElement;
   statusText = document.getElementById('status-text') as HTMLElement;
   playerContainer = document.getElementById('player-container') as HTMLElement;
   placeholder = document.getElementById('placeholder') as HTMLElement;
   
-  // Validate all elements exist
-  if (!maximizeBtn || !sizeSelect || !urlInput || !loadBtn || !statusText || !playerContainer || !placeholder) {
-    console.error('Prasaran: Required DOM elements not found');
+  if (!fullscreenBtn || !maximizeBtn || !sizeSelect || !scaleMode || !urlInput || !loadBtn || !statusText || !playerContainer || !placeholder) {
+    console.error('Prasaran: DOM elements not found');
     return;
   }
   
-  // Get screen size first
   await updateScreenSize();
   
-  // Attach event listeners
+  // Event listeners
+  fullscreenBtn.addEventListener('click', toggleFullscreen);
   maximizeBtn.addEventListener('click', toggleMaximize);
   sizeSelect.addEventListener('change', handleSizeChange);
+  scaleMode.addEventListener('change', handleScaleModeChange);
   loadBtn.addEventListener('click', handleLoadStream);
   urlInput.addEventListener('keypress', handleKeyPress);
   document.addEventListener('keydown', handleKeyDown);
   
-  // Check initial maximized state
+  // Handle window resize for Facebook streams
+  window.addEventListener('resize', () => {
+    if (currentPlatform === 'facebook' && currentStreamUrl) {
+      // Debounce reload
+      clearTimeout((window as unknown as { resizeTimeout?: number }).resizeTimeout);
+      (window as unknown as { resizeTimeout?: number }).resizeTimeout = window.setTimeout(() => {
+        reloadCurrentStream();
+      }, 500);
+    }
+  });
+  
   await checkMaximizedState();
-  
-  // Initial status
   setStatus('Ready', 'info');
-  
-  console.log('Prasaran: Initialized successfully');
+  console.log('Prasaran: Initialized');
 }
 
-// Start the application when DOM is loaded
 window.addEventListener('DOMContentLoaded', init);
