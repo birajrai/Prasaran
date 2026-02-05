@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "prasaran",
+  "productName": "Prasaran",
   "version": "0.1.0",
   "identifier": "io.github.birajrai.prasaran",
   "build": {
@@ -13,13 +13,17 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "prasaran",
-        "width": 800,
-        "height": 600
+        "title": "Prasaran - Stream Viewer",
+        "width": 1280,
+        "height": 720,
+        "resizable": false,
+        "maximizable": false,
+        "fullscreen": false,
+        "center": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.facebook.com https://www.youtube.com https://s.ytimg.com; frame-src https://www.facebook.com https://www.youtube.com https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://www.facebook.com https://www.youtube.com"
     }
   },
   "bundle": {
