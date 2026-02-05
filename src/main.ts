@@ -9,11 +9,11 @@
  * - Official embedded players only (iframe-based)
  * - Clean iframe replacement (old iframe destroyed before new one)
  * - Maximize/Restore window toggle (starts maximized)
- * - Window size presets for restored mode
+ * - Window size presets with screen size limiting
  * - Defensive error handling
  */
 
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { getCurrentWindow, LogicalSize, currentMonitor } from '@tauri-apps/api/window';
 
 // ============================================================
 // Types
@@ -62,6 +62,10 @@ let currentPlatform: Platform = null;
 /** Whether window is currently maximized */
 let isMaximized = true;
 
+/** Screen dimensions (updated on init) */
+let screenWidth = 1920;
+let screenHeight = 1080;
+
 // ============================================================
 // DOM Elements
 // ============================================================
@@ -77,6 +81,36 @@ let placeholder: HTMLElement;
 // ============================================================
 // Window Functions
 // ============================================================
+
+/**
+ * Gets the current monitor's screen size
+ */
+async function updateScreenSize(): Promise<void> {
+  try {
+    const monitor = await currentMonitor();
+    if (monitor) {
+      screenWidth = monitor.size.width;
+      screenHeight = monitor.size.height;
+      console.log(`Prasaran: Screen size detected: ${screenWidth}x${screenHeight}`);
+    }
+  } catch (err) {
+    console.error('Prasaran: Failed to get screen size', err);
+  }
+}
+
+/**
+ * Limits a size to fit within the screen (with some margin for taskbar)
+ */
+function limitToScreen(width: number, height: number): { width: number; height: number } {
+  // Leave margin for taskbar and window decorations
+  const maxWidth = screenWidth - 50;
+  const maxHeight = screenHeight - 100;
+  
+  return {
+    width: Math.min(width, maxWidth),
+    height: Math.min(height, maxHeight)
+  };
+}
 
 /**
  * Updates the maximize button icon based on current state
@@ -95,12 +129,13 @@ async function toggleMaximize(): Promise<void> {
     const appWindow = getCurrentWindow();
     
     if (isMaximized) {
-      // Restore to selected size
+      // Restore to selected size (limited to screen)
       await appWindow.unmaximize();
       const sizeKey = sizeSelect.value;
       const preset = SIZE_PRESETS[sizeKey];
       if (preset) {
-        await appWindow.setSize(new LogicalSize(preset.width, preset.height));
+        const limited = limitToScreen(preset.width, preset.height);
+        await appWindow.setSize(new LogicalSize(limited.width, limited.height));
         await appWindow.center();
       }
       isMaximized = false;
@@ -144,10 +179,17 @@ async function handleSizeChange(): Promise<void> {
 
   try {
     const appWindow = getCurrentWindow();
-    await appWindow.setSize(new LogicalSize(preset.width, preset.height));
+    
+    // Limit size to screen dimensions
+    const limited = limitToScreen(preset.width, preset.height);
+    await appWindow.setSize(new LogicalSize(limited.width, limited.height));
     await appWindow.center();
     
-    setStatus(`Resized to ${preset.width}x${preset.height}`, 'success');
+    if (limited.width !== preset.width || limited.height !== preset.height) {
+      setStatus(`Limited to ${limited.width}x${limited.height}`, 'info');
+    } else {
+      setStatus(`Resized to ${preset.width}x${preset.height}`, 'success');
+    }
     
     // Reload Facebook stream if loaded
     if (currentPlatform === 'facebook' && currentStreamUrl) {
@@ -390,6 +432,18 @@ function handleKeyPress(event: KeyboardEvent): void {
   }
 }
 
+/**
+ * Handles keyboard shortcuts
+ */
+function handleKeyDown(event: KeyboardEvent): void {
+  // Escape key to restore/minimize if window is too big
+  if (event.key === 'Escape' && !isMaximized) {
+    // Set to smallest size
+    sizeSelect.value = '640x360';
+    handleSizeChange();
+  }
+}
+
 // ============================================================
 // Initialization
 // ============================================================
@@ -410,7 +464,7 @@ async function checkMaximizedState(): Promise<void> {
 /**
  * Initializes the application when DOM is ready
  */
-function init(): void {
+async function init(): Promise<void> {
   // Get DOM elements
   maximizeBtn = document.getElementById('maximize-btn') as HTMLButtonElement;
   sizeSelect = document.getElementById('size-select') as HTMLSelectElement;
@@ -426,14 +480,18 @@ function init(): void {
     return;
   }
   
+  // Get screen size first
+  await updateScreenSize();
+  
   // Attach event listeners
   maximizeBtn.addEventListener('click', toggleMaximize);
   sizeSelect.addEventListener('change', handleSizeChange);
   loadBtn.addEventListener('click', handleLoadStream);
   urlInput.addEventListener('keypress', handleKeyPress);
+  document.addEventListener('keydown', handleKeyDown);
   
   // Check initial maximized state
-  checkMaximizedState();
+  await checkMaximizedState();
   
   // Initial status
   setStatus('Ready', 'info');
