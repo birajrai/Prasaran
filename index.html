@@ -10,17 +10,19 @@
   <body>
     <!-- 
       Prasaran: Lightweight stream viewer for OBS Window Capture
-      - Selectable window sizes for different streaming needs
-      - Auto mode for Facebook to show native stream size
+      - Starts maximized by default
+      - Maximize/Restore toggle button
       - Black background for clean OBS capture
       - Minimal DOM for stability
     -->
     
     <!-- Top control bar - stays fixed at top -->
     <div id="control-bar">
-      <!-- Size selector -->
-      <select id="size-select" title="Window Size">
-        <option value="auto">Auto (Native Size)</option>
+      <!-- Maximize/Restore button -->
+      <button id="maximize-btn" type="button" title="Restore Down">&#9634;</button>
+      
+      <!-- Size selector (for restore mode) -->
+      <select id="size-select" title="Window Size (when restored)">
         <option value="1920x1080">1920x1080 (1080p)</option>
         <option value="1280x720" selected>1280x720 (720p)</option>
         <option value="854x480">854x480 (480p)</option>
